@@ -9,6 +9,7 @@ class ReplayMemory:
         self.rewards = np.empty([size], dtype=np.float32)
         
         self.ptr = 0
+        self.size = 0
         self.max_size = size
     
     def add(self, state, action, next_state, reward, done):
@@ -19,17 +20,18 @@ class ReplayMemory:
         self.rewards[self.ptr] = reward
         
         self.ptr = (self.ptr + 1) % self.max_size
+        self.size = min(self.size + 1, self.max_size)
         
     def sample(self, batch_size):
-        idx = np.random.randint(0, self.ptr)
+        idx = np.random.randint(0, self.ptr, size=batch_size)
         
-        return dict(
-            states = self.states[idx],
-            actions = self.actions[idx],
-            next_states = self.next_states[idx],
-            done_flags = self.done_flags[idx],
-            rewards = self.rewards[idx])
+        return {
+            "states": self.states[idx],
+            "actions": self.actions[idx],
+            "next_states": self.next_states[idx],
+            "done_flags": self.done_flags[idx],
+            "rewards": self.rewards[idx]}
         
     def __len__(self):
-        return self.ptr
+        return self.size
         
