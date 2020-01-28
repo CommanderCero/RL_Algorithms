@@ -1,4 +1,4 @@
-from dql import ReplayMemory
+from dqn import ReplayMemory
 import gym
 import numpy as np
 
@@ -40,13 +40,13 @@ def validate_overflow_handling(env_id):
 def validate_sample_content():
     memory = ReplayMemory((100, 200), 4, 10000)
     
-    state = np.random.rand(100, 200) * 50
+    state = np.random.randint(0, 100, (100, 200))
     memory.add(state, [0,1,2,3], state, 200, 1)
     data = memory.sample(1)
     
-    assert np.mean(data["states"][0] - state) <= 1e-8
-    assert np.mean(data["actions"] - [0,1,2,3]) <= 1e-8
-    assert np.mean(data["next_states"][0] - state) <= 1e-8
+    assert np.mean(data["states"][0] - state) == 0
+    assert np.mean(data["actions"] - [0,1,2,3]) == 0
+    assert np.mean(data["next_states"][0] - state) == 0
     assert int(data["rewards"][0]) == 200
     assert int(data["done_flags"][0]) == 1
             
