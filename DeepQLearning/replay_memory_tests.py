@@ -17,19 +17,19 @@ def collect_experiences(env, memory, num_experiences):
             
 def validate_sample_shapes(env_id):
     env = gym.make(env_id)
-    memory = ReplayMemory(env.observation_space.shape, env.action_space.n, 500)
+    memory = ReplayMemory(env.observation_space.shape, 500)
     collect_experiences(env, memory, 250)
     
     batch = memory.sample(32)
     assert batch["states"].shape == (32, *env.observation_space.shape), "Invalid sample shape"
-    assert batch["actions"].shape == (32, env.action_space.n), "Invalid sample shape"
+    assert batch["actions"].shape == (32,), "Invalid sample shape"
     assert batch["next_states"].shape == (32, *env.observation_space.shape), "Invalid sample shape"
     assert batch["done_flags"].shape == (32,), "Invalid sample shape"
     assert batch["rewards"].shape == (32,), "Invalid sample shape"
     
 def validate_overflow_handling(env_id):
     env = gym.make(env_id)
-    memory = ReplayMemory(env.observation_space.shape, env.action_space.n, 500)
+    memory = ReplayMemory(env.observation_space.shape, 500)
     
     assert len(memory) == 0, "Invalid length"
     collect_experiences(env, memory, 250)
@@ -38,14 +38,14 @@ def validate_overflow_handling(env_id):
     assert len(memory) == 500, "Invalid length"
     
 def validate_sample_content():
-    memory = ReplayMemory((100, 200), 4, 10000)
+    memory = ReplayMemory((100, 200), 10000)
     
     state = np.random.randint(0, 100, (100, 200))
-    memory.add(state, [0,1,2,3], state, 200, 1)
+    memory.add(state, 3, state, 200, 1)
     data = memory.sample(1)
     
     assert np.mean(data["states"][0] - state) == 0
-    assert np.mean(data["actions"] - [0,1,2,3]) == 0
+    assert np.mean(data["actions"][0] - 3) == 0
     assert np.mean(data["next_states"][0] - state) == 0
     assert int(data["rewards"][0]) == 200
     assert int(data["done_flags"][0]) == 1
