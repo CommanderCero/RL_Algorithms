@@ -49,7 +49,7 @@ def default_network_template(obs_shape, act_dim):
 class DQNAgent:
     def __init__(self, env_fn, network_template=default_network_template,
                  reward_decay=0.99, memory_size=10000, exploration_steps=2000,
-                 steps_per_epoch=250, batch_size=32):
+                 steps_per_epoch=250, batch_size=32, copy_factor=0.995):
         self.env_fn = env_fn
         self.env = env_fn()
         self.test_env = env_fn()
@@ -60,12 +60,16 @@ class DQNAgent:
         self.exploration_steps = exploration_steps
         self.steps_per_epoch = steps_per_epoch
         self.batch_size = batch_size
+        self.copy_factor = copy_factor
+        self.step = 0
         
         self.memory = ReplayMemory(self.obs_shape, memory_size)
         self.q_network = network_template(self.obs_shape, self.act_dim)
+        self.target_q_network = network_template(self.obs_shape, self.act_dim)
         self.optimizer = torch.optim.RMSprop(self.q_network.parameters(), lr=1e-3)
         
-        self.step = 0
+        # Make sure the target-network has the same parameters as our q_network
+        self.__update_target_weights__(1)
         
     def test_run(self, episodes=10, render=False):
         returns = []
@@ -120,6 +124,8 @@ class DQNAgent:
                 # Train the q-network
                 batch = self.memory.sample(self.batch_size)
                 self.train(batch)
+                # Copy weights to target-network
+                self.__update_target_weights__(self.copy_factor)
                 
                 # End of epoch - Log some data about our agent
                 if self.step % self.steps_per_epoch == 0:
@@ -144,9 +150,15 @@ class DQNAgent:
         
         # Calculate the target with the bellman-equation
         # Q(s,a) = r + gamma * max[Q(s', a'))]
+        # Note we use double Q-Learning to stabilize training
         with torch.no_grad():
-            next_q_values = self.q_network(next_states)
-            target = rewards + (1 - done) * self.reward_decay * torch.max(next_q_values, axis=1).values
+            q_values = self.q_network(next_states)
+            target_q_values = self.target_q_network(next_states)
+            target_actions = torch.max(target_q_values, axis=1).indices
+            # Not really a maximum, but should stabilize the training
+            max_q_values = torch.gather(q_values, 1, target_actions.view(-1,1)).squeeze()
+            
+            target = rewards + (1 - done) * self.reward_decay * max_q_values
         
         # Calculate the q_values for the old states and the values that we want to change
         q_values = self.q_network(states)
@@ -157,6 +169,14 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
+        
+    def __update_target_weights__(self, tau):
+        target_dict = dict(self.target_q_network.named_parameters())
+        for name, param in self.q_network.named_parameters():
+            new_target_weight = tau * param.data + (1-tau) * target_dict[name].data
+            target_dict[name].data.copy_(new_target_weight)
+            
+            
         
 
 if __name__ == "__main__":
