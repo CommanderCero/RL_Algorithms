@@ -38,6 +38,15 @@ class ReplayMemory:
         
     def __len__(self):
         return self.size
+
+def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
+    """
+        Copied from Google Dopamine's DQN-Agent
+    """
+    steps_left = decay_period + warmup_steps - step
+    bonus = (1.0 - epsilon) * steps_left / decay_period
+    bonus = np.clip(bonus, 0., 1. - epsilon)
+    return epsilon + bonus
     
 def default_network_template(obs_shape, act_dim):
     return nn.Sequential(
@@ -49,6 +58,7 @@ def default_network_template(obs_shape, act_dim):
 class DQNAgent:
     def __init__(self, env_fn, network_template=default_network_template,
                  reward_decay=0.99, memory_size=10000, exploration_steps=2000,
+                 epsilon=0.01, epsilon_decay_period=4000,
                  steps_per_epoch=250, batch_size=32):
         self.env_fn = env_fn
         self.env = env_fn()
@@ -58,6 +68,8 @@ class DQNAgent:
         
         self.reward_decay = reward_decay
         self.exploration_steps = exploration_steps
+        self.epsilon = epsilon
+        self.epsilon_decay_period = epsilon_decay_period
         self.steps_per_epoch = steps_per_epoch
         self.batch_size = batch_size
         
@@ -96,11 +108,15 @@ class DQNAgent:
         state = self.env.reset()
         for i in range(total_steps):
             
-            # Select action
             if self.step < self.exploration_steps:
                 action = self.env.action_space.sample()
             else:
-                action = self.select_action(state)
+                # Select action with an epsilon greedy policy
+                epsilon = linearly_decaying_epsilon(self.epsilon_decay_period, self.step, self.exploration_steps, self.epsilon)
+                if np.random.rand() < epsilon:
+                    action = self.select_action(state)
+                else:
+                    action = self.env.action_space.sample()
                 
             # Step the environment
             new_state, reward, done, _ = self.env.step(action)
@@ -124,7 +140,7 @@ class DQNAgent:
                 # End of epoch - Log some data about our agent
                 if self.step % self.steps_per_epoch == 0:
                     returns, ep_lengths = self.test_run()
-                    print("Avg Return: {:<15}Avg Ep-Length: {}".format(np.mean(returns), np.mean(ep_lengths)))
+                    print("Avg Return: {:<15.2f}Avg Ep-Length: {}".format(np.mean(returns), np.mean(ep_lengths)))
                 
             
     def select_action(self, state):
