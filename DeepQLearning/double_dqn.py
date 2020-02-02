@@ -4,6 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import wandb
+
 class ReplayMemory:
     def __init__(self, obs_shape, size):
         self.states = np.empty([size, *obs_shape], dtype=np.float32)
@@ -51,7 +53,9 @@ def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
 def default_network_template(obs_shape, act_dim):
     return nn.Sequential(
         nn.modules.Flatten(),
-        nn.Linear(np.prod(obs_shape), 256),
+        nn.Linear(np.prod(obs_shape), 512),
+        nn.ReLU(),
+        nn.Linear(512, 256),
         nn.ReLU(),
         nn.Linear(256, act_dim))
         
@@ -139,7 +143,7 @@ class DQNAgent:
             if self.step > self.exploration_steps:
                 # Train the q-network
                 batch = self.memory.sample(self.batch_size)
-                self.train(batch)
+                loss = self.train(batch)
                 # Copy weights to target-network
                 self.__update_target_weights__(self.copy_factor)
                 
@@ -147,6 +151,16 @@ class DQNAgent:
                 if self.step % self.steps_per_epoch == 0:
                     returns, ep_lengths = self.test_run()
                     print("Avg Return: {:<15.2f}Avg Ep-Length: {}".format(np.mean(returns), np.mean(ep_lengths)))
+                    
+                    # Weights & Biases logging
+                    wandb.log({
+                        "Loss": loss, 
+                        "Avg. Return": np.mean(returns), 
+                        "Max Return": np.max(returns),
+                        "Min Return": np.min(returns),
+                        "Avg. Episode Length": np.mean(ep_lengths),
+                        "Epsilon": epsilon})
+                    
                 
             
     def select_action(self, state):
@@ -185,15 +199,24 @@ class DQNAgent:
         self.optimizer.step()
         self.optimizer.zero_grad()
         
+        return loss
+        
     def __update_target_weights__(self, tau):
         target_dict = dict(self.target_q_network.named_parameters())
         for name, param in self.q_network.named_parameters():
-            new_target_weight = tau * param.data + (1-tau) * target_dict[name].data
+            new_target_weight = tau * target_dict[name].data + (1-tau) * param.data
             target_dict[name].data.copy_(new_target_weight)
 
 if __name__ == "__main__":
-    env_fn = lambda: gym.make("CartPole-v0")
+    import datetime
+    
+    env_fn = lambda: gym.make("LunarLander-v2")
     agent = DQNAgent(env_fn)
+    
+    wandb.login(anonymous="never", key="0092be063f04e8d86d82ccef90301f97307b81d9")
+    wandb.init(name=f"Double_DQN_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}", project="rl_algorithms")
+    wandb.watch(agent.q_network, log="all")
+    wandb.watch(agent.target_q_network, log="all")
     
     agent.train_run(10000)
     agent.test_run(episodes=10, render=True)
