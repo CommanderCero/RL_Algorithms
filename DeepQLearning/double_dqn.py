@@ -1,9 +1,8 @@
+import os
 import gym
 import numpy as np
-
 import torch
 import torch.nn as nn
-
 import wandb
 
 class ReplayMemory:
@@ -63,7 +62,8 @@ class DQNAgent:
     def __init__(self, env_fn, network_template=default_network_template,
                  reward_decay=0.99, memory_size=10000, exploration_steps=2000,
                  epsilon=0.01, epsilon_decay_period=4000,
-                 steps_per_epoch=250, batch_size=32, copy_factor=0.995):
+                 steps_per_epoch=250, batch_size=32, copy_factor=0.995,
+                 save_folder="./checkpoints"):
         self.env_fn = env_fn
         self.env = env_fn()
         self.test_env = env_fn()
@@ -78,6 +78,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.copy_factor = copy_factor
         self.step = 0
+        self.save_folder = save_folder
         
         self.memory = ReplayMemory(self.obs_shape, memory_size)
         self.q_network = network_template(self.obs_shape, self.act_dim)
@@ -150,7 +151,10 @@ class DQNAgent:
                 # End of epoch - Log some data about our agent
                 if self.step % self.steps_per_epoch == 0:
                     returns, ep_lengths = self.test_run()
-                    print("Avg Return: {:<15.2f}Avg Ep-Length: {}".format(np.mean(returns), np.mean(ep_lengths)))
+                    print("Avg Return: {:<15.2f}".format(np.mean(returns)))
+                    
+                    # Save Model
+                    self.save_models(self.save_folder)
                     
                     # Weights & Biases logging
                     wandb.log({
@@ -200,6 +204,14 @@ class DQNAgent:
         self.optimizer.zero_grad()
         
         return loss
+    
+    def save_models(self, path):
+        torch.save(self.q_network.state_dict(), os.path.join(path, f"q_network_{self.step}.pt"))
+        torch.save(self.target_q_network.state_dict(), os.path.join(path, f"target_q_network_{self.step}.pt"))
+        
+    def load_models(self, path, step):
+        self.q_network.load_state_dict(torch.load(os.path.join(path, f"q_network_{step}.pt")))
+        self.target_q_network.load_state_dict(torch.load(os.path.join(path, f"target_q_network_{step}.pt")))
         
     def __update_target_weights__(self, tau):
         target_dict = dict(self.target_q_network.named_parameters())
@@ -209,14 +221,34 @@ class DQNAgent:
 
 if __name__ == "__main__":
     import datetime
+    import argparse
+    from pathlib import Path
     
+    # Parse commandline arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save_folder", help="Folder in which the model will be saved", default="./checkpoints")
+    parser.add_argument("--memory_size", help="Size of the ReplayMemory", type=int, default="10000")
+    parser.add_argument("--exploration_steps", help="How many random steps should be executed to prefill the ReplayMemory", type=int, default="2000")
+    parser.add_argument("--epsilon", help="The minimum epsilon for the epsilon-greedy policy", type=float, default="0.01")
+    parser.add_argument("--epsilon_decay_period", help="How many steps are needed to reach the minimum epsilon", type=int, default="4000")
+    parser.add_argument("--steps_per_epoch", help="""Specifies how many steps are equal to one epoch.
+                        After every epoch we will save a model checkpoint and log the agents performance""", type=int, default="500")
+    args = parser.parse_args()
+    
+    # Make sure the checkpoint folder exists
+    Path(args.save_folder).mkdir(parents=True, exist_ok=True)
+    
+    # Setup agent
     env_fn = lambda: gym.make("LunarLander-v2")
-    agent = DQNAgent(env_fn)
+    agent = DQNAgent(env_fn, **vars(args))
     
-    wandb.login(anonymous="never", key="0092be063f04e8d86d82ccef90301f97307b81d9")
+    # Setup logging
     wandb.init(name=f"Double_DQN_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}", project="rl_algorithms")
     wandb.watch(agent.q_network, log="all")
     wandb.watch(agent.target_q_network, log="all")
     
+    # Train and Test
     agent.train_run(10000)
     agent.test_run(episodes=10, render=True)
+    
+    
