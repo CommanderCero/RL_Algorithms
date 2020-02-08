@@ -208,7 +208,7 @@ class VPGAgent(nn.Module):
         advantages = torch.from_numpy(data["advantages"])
         
         # Train actor
-        log_probs = self.actor(states).log_prob(actions).reshape(-1)
+        log_probs = self.actor(states).log_prob(actions).sum(axis=-1).reshape(-1)
         # Note we negate the formula to turn our minimization into an maximization
         # Also technically this is not a loss but a trick to calculate the policy gradient
         actor_loss = -(log_probs * advantages).mean()
