@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import modules
 import scipy.signal as signal
+import wandb
 
 def discounted_cumsum(arr, discount):
     """Taken from https://stackoverflow.com/questions/47970683/vectorize-a-numpy-discount-calculation"""
@@ -102,30 +103,35 @@ class VPGAgent(nn.Module):
         self.buffer = VPGBuffer(self.state_shape, self.act_dim, buffer_size, self.critic)
         self.step = 0
         
-    def test_run(self, episodes=10, render=False):
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=1e-3)
+        
+    def test_run(self, episodes=10, render=False, max_steps=500):
         # Normally we would have to call render constantly while stepping through the environment
         # Pybulletgym handles this a bit differently
         # We HAVE to call it before reset and only need to do it once
         # aka -> This code only works with pybulletgym's environments
         if render:
-            self.test_env.render()
+            self.test_env.render(mode="human")
         
         returns = []
         ep_lengths = []
         for i in range(episodes):
             state = self.test_env.reset()
-            done = False
             returns.append(0)
             ep_lengths.append(0)
             
-            while not done:
+            for _ in range(max_steps):
                 action = self.select_action(state)
                 state, reward, done, _ = self.test_env.step(action)
                 if render:
-                    self.test_env.render()
+                    self.test_env.render(mode="human")
                 
                 returns[i] += reward
                 ep_lengths[i] += 1
+                
+                if done:
+                    break
                 
         # Close the test environment after rendering to prevent any "dead" windows
         if render:
@@ -136,11 +142,17 @@ class VPGAgent(nn.Module):
     
     def train_run(self, total_steps):
         state = self.env.reset()
+        episode_lengths = [0]
+        episode_returns = [0]
         for i in range(total_steps):    
             # Step the environment
             action = self.select_action(state)
             new_state, reward, done, _ = self.env.step(action)
             self.step += 1
+            
+            # Collect some data for later logging
+            episode_lengths[-1] += 1
+            episode_returns[-1] += reward
             
             # Add experience to buffer
             self.buffer.add(state, action, reward)
@@ -153,37 +165,34 @@ class VPGAgent(nn.Module):
                 self.buffer.end_trajectory(new_state, done)
                 state = self.env.reset()
                 
+                episode_lengths.append(0)
+                episode_returns.append(0)
+                
             if self.step % self.steps_per_epoch == 0:
-                if not done:
-                    print("Warning: Cutoff trajectory")
+                if not done: 
                     self.buffer.end_trajectory(new_state, False)
                     
+                # Train actor and critic
                 data = self.buffer.get_data()
                 self.buffer.clear()
-            
-            #if self.step > self.exploration_steps:
-            #    # Train the q-network
-            #    batch = self.memory.sample(self.batch_size)
-            #    loss = self.train(batch)
-            #    # Copy weights to target-network
-            #    self.__update_target_weights__(self.copy_factor)
-            #    
-            #    # End of epoch - Log some data about our agent
-            #    if self.step % self.steps_per_epoch == 0:
-            #        returns, ep_lengths = self.test_run()
-            #        print("Avg Return: {:<15.2f}".format(np.mean(returns)))
-            #        
-            #        # Save Model
-            #        self.save_models(self.save_folder)
-            #        
-            #        # Weights & Biases logging
-            #        wandb.log({
-            #            "Loss": loss, 
-            #            "Avg. Return": np.mean(returns), 
-            #            "Max Return": np.max(returns),
-            #            "Min Return": np.min(returns),
-            #            "Avg. Episode Length": np.mean(ep_lengths),
-            #            "Epsilon": epsilon})
+                actor_loss, critic_loss = self.train(data)
+                
+                # Log some data about our agent
+                print(np.mean(episode_returns))
+                
+                # Weights & Biases logging
+                wandb.log({
+                    "Actor Loss": actor_loss,
+                    "Critic Loss": critic_loss,
+                    "Avg. Return": np.mean(episode_returns), 
+                    "Max Return": np.max(episode_returns),
+                    "Min Return": np.min(episode_returns),
+                    "Avg. Episode Length": np.mean(episode_lengths)})
+                
+                # Clear data collection arrays
+                episode_lengths = [0]
+                episode_returns = [0]
+                
     
     def select_action(self, state):
         state_tensor = torch.Tensor([state])
@@ -193,13 +202,46 @@ class VPGAgent(nn.Module):
             
         return action
     
+    def train(self, data):
+        states = torch.from_numpy(data["states"])
+        actions = torch.from_numpy(data["actions"])
+        returns = torch.from_numpy(data["returns"])
+        advantages = torch.from_numpy(data["advantages"])
+        
+        # Train actor
+        log_probs = self.actor(states).log_prob(actions).reshape(-1)
+        # Note we negate the formula to turn our minimization into an maximization
+        # Also technically this is not a loss but a trick to calculate the policy gradient
+        actor_loss = -(log_probs * advantages).mean()
+        
+        actor_loss.backward()
+        self.actor_optimizer.step()
+        self.actor_optimizer.zero_grad()
+        
+        # Train critic
+        state_values = self.critic(states).reshape(-1)
+        critic_loss = ((state_values - returns) ** 2).mean()
+        
+        critic_loss.backward()
+        self.critic_optimizer.step()
+        self.critic_optimizer.zero_grad()
+        
+        return (actor_loss, critic_loss)
+    
 if __name__ == "__main__":
+    import datetime
+    
     # Setup agent
-    env_fn = lambda: gym.make("InvertedPendulumPyBulletEnv-v0")
+    env_fn = lambda: gym.make("InvertedPendulumPyBulletEnv-v0").unwrapped
     agent = VPGAgent(env_fn)
     
+    # Setup logging
+    wandb.init(name=f"VPG_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}", project="rl_algorithms")
+    wandb.watch(agent.actor, log="all")
+    wandb.watch(agent.critic, log="all")
+    
     # Train and Test
-    agent.train_run(100000)
-    agent.test_run(episodes=10000, render=True)
+    agent.train_run(250000)
+    agent.test_run(episodes=100, render=True)
     
     
