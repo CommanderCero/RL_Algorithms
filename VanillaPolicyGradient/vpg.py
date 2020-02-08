@@ -6,6 +6,7 @@ import torch.nn as nn
 import modules
 import scipy.signal as signal
 import wandb
+import os
 
 def discounted_cumsum(arr, discount):
     """Taken from https://stackoverflow.com/questions/47970683/vectorize-a-numpy-discount-calculation"""
@@ -82,9 +83,7 @@ class VPGBuffer:
         return self.size
     
 class VPGAgent(nn.Module):
-    def __init__(self, env_fn, reward_decay=0.99, buffer_size=10000,
-                 steps_per_epoch=250, batch_size=32,
-                 save_folder="./checkpoints"):
+    def __init__(self, env_fn, reward_decay=0.99, steps_per_epoch=250, save_folder="./checkpoints"):
         super().__init__()
         
         self.env_fn = env_fn
@@ -95,12 +94,11 @@ class VPGAgent(nn.Module):
         
         self.reward_decay = reward_decay
         self.steps_per_epoch = steps_per_epoch
-        self.batch_size = batch_size
         self.save_folder = save_folder
         
         self.actor = modules.MLPGaussianPolicy(self.state_shape, self.act_dim)
         self.critic = modules.MLPValueFunction(self.state_shape)
-        self.buffer = VPGBuffer(self.state_shape, self.act_dim, buffer_size, self.critic)
+        self.buffer = VPGBuffer(self.state_shape, self.act_dim, steps_per_epoch, self.critic)
         self.step = 0
         
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
@@ -177,8 +175,9 @@ class VPGAgent(nn.Module):
                 self.buffer.clear()
                 actor_loss, critic_loss = self.train(data)
                 
-                # Log some data about our agent
+                # Log some data
                 print(np.mean(episode_returns))
+                self.save_models(self.save_folder)
                 
                 # Weights & Biases logging
                 wandb.log({
@@ -228,20 +227,42 @@ class VPGAgent(nn.Module):
         
         return (actor_loss, critic_loss)
     
+    def save_models(self, path):
+        torch.save(self.actor.state_dict(), os.path.join(path, f"actor_{self.step}.pt"))
+        torch.save(self.critic.state_dict(), os.path.join(path, f"critic_{self.step}.pt"))
+        
+    def load_models(self, path, step):
+        self.actor.load_state_dict(torch.load(os.path.join(path, f"actor_{step}.pt")))
+        self.critic.load_state_dict(torch.load(os.path.join(path, f"critic_{step}.pt")))
+    
 if __name__ == "__main__":
     import datetime
+    import argparse
+    from pathlib import Path
+    
+    # Parse commandline arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--environment_id", help="The ID for the OpenAI-Gym environment that will be used for training", default="InvertedPendulumPyBulletEnv-v0")
+    parser.add_argument("--save_folder", help="Folder in which the model will be saved", default="./checkpoints")
+    parser.add_argument("--steps_per_epoch", help="""Specifies how many steps are equal to one epoch.
+                        After every epoch we will save a model checkpoint and log the agents performance""", type=int, default="500")
+    parser.add_argument("--steps", help="Specifies how many steps the agent can interact with the environment", type=int, default=250000)                        
+                        
+    args = parser.parse_args()
+    
+    # Make sure the checkpoint folder exists
+    Path(args.save_folder).mkdir(parents=True, exist_ok=True)
     
     # Setup agent
-    env_fn = lambda: gym.make("InvertedPendulumPyBulletEnv-v0").unwrapped
-    agent = VPGAgent(env_fn)
+    env_fn = lambda: gym.make(args.environment_id)
+    agent = VPGAgent(env_fn, save_folder=args.save_folder, steps_per_epoch=args.steps_per_epoch)
     
     # Setup logging
-    wandb.init(name=f"VPG_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}", project="rl_algorithms")
+    wandb.init(name=f"VPG_{args.environment_id}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}", project="rl_algorithms")
     wandb.watch(agent.actor, log="all")
     wandb.watch(agent.critic, log="all")
     
     # Train and Test
-    agent.train_run(250000)
-    agent.test_run(episodes=100, render=True)
+    agent.train_run(args.steps)
     
     
