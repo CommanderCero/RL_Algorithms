@@ -88,7 +88,6 @@ class VPGAgent(nn.Module):
         
         self.env_fn = env_fn
         self.env = env_fn()
-        self.test_env = env_fn()
         self.state_shape = self.env.observation_space.shape
         self.act_dim = self.env.action_space.shape[0]
         
@@ -103,40 +102,6 @@ class VPGAgent(nn.Module):
         
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=3e-4)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=1e-3)
-        
-    def test_run(self, episodes=10, render=False, max_steps=500):
-        # Normally we would have to call render constantly while stepping through the environment
-        # Pybulletgym handles this a bit differently
-        # We HAVE to call it before reset and only need to do it once
-        # aka -> This code only works with pybulletgym's environments
-        if render:
-            self.test_env.render(mode="human")
-        
-        returns = []
-        ep_lengths = []
-        for i in range(episodes):
-            state = self.test_env.reset()
-            returns.append(0)
-            ep_lengths.append(0)
-            
-            for _ in range(max_steps):
-                action = self.select_action(state)
-                state, reward, done, _ = self.test_env.step(action)
-                if render:
-                    self.test_env.render(mode="human")
-                
-                returns[i] += reward
-                ep_lengths[i] += 1
-                
-                if done:
-                    break
-                
-        # Close the test environment after rendering to prevent any "dead" windows
-        if render:
-            self.test_env.close()
-            self.test_env = self.env_fn()
-            
-        return (returns, ep_lengths)
     
     def train_run(self, total_steps):
         state = self.env.reset()
@@ -208,7 +173,7 @@ class VPGAgent(nn.Module):
         advantages = torch.from_numpy(data["advantages"])
         
         # Train actor
-        log_probs = self.actor(states).log_prob(actions).sum(axis=-1).reshape(-1)
+        log_probs = self.actor(states).log_prob(actions).sum(axis=-1)
         # Note we negate the formula to turn our minimization into an maximization
         # Also technically this is not a loss but a trick to calculate the policy gradient
         actor_loss = -(log_probs * advantages).mean()
@@ -245,8 +210,8 @@ if __name__ == "__main__":
     parser.add_argument("--environment_id", help="The ID for the OpenAI-Gym environment that will be used for training", default="InvertedPendulumPyBulletEnv-v0")
     parser.add_argument("--save_folder", help="Folder in which the model will be saved", default="./checkpoints")
     parser.add_argument("--steps_per_epoch", help="""Specifies how many steps are equal to one epoch.
-                        After every epoch we will save a model checkpoint and log the agents performance""", type=int, default="500")
-    parser.add_argument("--steps", help="Specifies how many steps the agent can interact with the environment", type=int, default=250000)                        
+                        After every epoch we will save a model checkpoint and log the agents performance""", type=int, default="5000")
+    parser.add_argument("--steps", help="Specifies how many steps the agent can interact with the environment", type=int, default=500000)                        
                         
     args = parser.parse_args()
     
