@@ -13,7 +13,8 @@ def discounted_cumsum(arr, discount):
     return signal.lfilter([1], [1, -discount], x=arr[::-1])[::-1]
 
 class VPGBuffer:
-    def __init__(self, state_shape, act_dim, size, state_value_net, reward_decay=0.99):
+    def __init__(self, state_shape, act_dim, size, state_value_net,
+                 reward_decay=0.99, advantage_lambda = 0.95):
         self.states = np.empty([size, *state_shape], dtype=np.float32)
         self.actions = np.empty([size, act_dim], dtype=np.float32)
         self.rewards = np.empty([size], dtype=np.float32)
@@ -22,6 +23,7 @@ class VPGBuffer:
         
         self.state_value_net = state_value_net
         self.reward_decay = reward_decay
+        self.advantage_lambda = advantage_lambda
         
         self.traj_start_ptr = 0
         self.curr_ptr = 0
@@ -51,8 +53,9 @@ class VPGBuffer:
         # Calculate rewards to go
         self.returns[sl] = discounted_cumsum(rewards, self.reward_decay)[:-1]
         
-        # Calculate advantage
-        self.advantages[sl] = rewards[:-1] + self.reward_decay * state_values[1:] - state_values[:-1]
+        # Calculate advantage with GAE-Lambda advantage calculation
+        temp_diff_errors = rewards[:-1] + self.reward_decay * state_values[1:] - state_values[:-1]
+        self.advantages[sl] = discounted_cumsum(temp_diff_errors, self.reward_decay * self.advantage_lambda)
         
     def add(self, state, action, reward):
         assert self.size < self.max_size, "VPGBuffer overflow"
@@ -66,12 +69,16 @@ class VPGBuffer:
         
     def get_data(self):
         sl = slice(0, self.curr_ptr)
+        
+        adv_mean = np.mean(self.advantages[sl])
+        adv_std = np.std(self.advantages[sl])
+        
         return {
             "states": self.states[sl],
             "actions": self.actions[sl],
             "rewards": self.rewards[sl],
             "returns": self.returns[sl],
-            "advantages": self.advantages[sl]
+            "advantages": (self.advantages[sl] - adv_mean) / adv_std
         }
     
     def clear(self):

@@ -14,7 +14,9 @@ class MLPGaussianPolicy(nn.Module):
         self.log_std = nn.Parameter(torch.from_numpy(self.log_std))
         self.mean_network = nn.Sequential(
             nn.modules.Flatten(),
-            nn.Linear(np.prod(obs_shape), 512),
+            nn.Linear(np.prod(obs_shape), 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Linear(512, 256),
             nn.ReLU(),
@@ -32,7 +34,9 @@ class MLPValueFunction(nn.Module):
         
         self.value_network = nn.Sequential(
             nn.modules.Flatten(),
-            nn.Linear(np.prod(obs_shape), 512),
+            nn.Linear(np.prod(obs_shape), 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
             nn.ReLU(),
             nn.Linear(512, 256),
             nn.ReLU(),

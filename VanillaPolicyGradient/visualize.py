@@ -18,7 +18,7 @@ def collect_frames(agent, num_frames):
     return frames
 
 if __name__ == "__main__":
-    NUM_FRAMES = 200
+    NUM_FRAMES = 1000
     target_envs = ["InvertedPendulumPyBulletEnv-v0",
                    "InvertedDoublePendulumPyBulletEnv-v0",
                    "Walker2DPyBulletEnv-v0",
