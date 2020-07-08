@@ -250,5 +250,3 @@ if __name__ == "__main__":
     # Train and Test
     agent.train_run(10000)
     agent.test_run(episodes=10, render=True)
-    
-    
