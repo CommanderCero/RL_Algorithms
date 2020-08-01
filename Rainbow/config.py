@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from models import SimpleDQN
+from models import SimpleDQN, DuelingDQN
 import torch
 import warnings
 
@@ -18,6 +18,21 @@ HYPERPARAMETERS = {
     "Pong": SimpleNamespace(**{
         "env_name": "PongNoFrameskip-v4",
         "model_fn": SimpleDQN,
+        "stop_reward": 18.0,
+        "run_name": "pong",
+        "replay_size": 100000,
+        "replay_initial": 10000,
+        "target_net_sync": 1000,
+        "epsilon_frames": 100000,
+        "epsilon_start": 1.0,
+        "epsilon_end": 0.02,
+        "learning_rate": 0.0001,
+        "gamma": 0.99,
+        "batch_size": 32
+    }),
+    "PongDueling": SimpleNamespace(**{
+        "env_name": "PongNoFrameskip-v4",
+        "model_fn": DuelingDQN,
         "stop_reward": 18.0,
         "run_name": "pong",
         "replay_size": 100000,

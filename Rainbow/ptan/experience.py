@@ -412,10 +412,12 @@ class PrioReplayBufferNaive:
 
 
 class PrioritizedReplayBuffer(ExperienceReplayBuffer):
-    def __init__(self, experience_source, buffer_size, alpha):
+    def __init__(self, experience_source, buffer_size, alpha, beta):
         super(PrioritizedReplayBuffer, self).__init__(experience_source, buffer_size)
         assert alpha > 0
+        assert beta > 0
         self._alpha = alpha
+        self._beta = beta
 
         it_capacity = 1
         while it_capacity < buffer_size:
@@ -439,18 +441,16 @@ class PrioritizedReplayBuffer(ExperienceReplayBuffer):
             res.append(idx)
         return res
 
-    def sample(self, batch_size, beta):
-        assert beta > 0
-
+    def sample(self, batch_size):
         idxes = self._sample_proportional(batch_size)
 
         weights = []
         p_min = self._it_min.min() / self._it_sum.sum()
-        max_weight = (p_min * len(self)) ** (-beta)
+        max_weight = (p_min * len(self)) ** (-self._beta)
 
         for idx in idxes:
             p_sample = self._it_sum[idx] / self._it_sum.sum()
-            weight = (p_sample * len(self)) ** (-beta)
+            weight = (p_sample * len(self)) ** (-self._beta)
             weights.append(weight / max_weight)
         weights = np.array(weights, dtype=np.float32)
         samples = [self.buffer[idx] for idx in idxes]
