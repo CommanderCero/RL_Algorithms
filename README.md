@@ -6,7 +6,7 @@ Implementation of the Actor-Critic Algorithm using Advantage Estimation to reduc
 Code can be found in **./A2C/simpleActorCritic.py**
 
 ## LunarLander
-![Easteregg Text](./A2C/trained_models/LunarLander/lunarLander.gif)
+<img src="./A2C/trained_models/LunarLander/lunarLander.gif" width="400" height="auto"/>
 
 ## PyBullet Hopper
-![Easteregg Text](./A2C/trained_models/PyBulletHopper/hopper.gif)
+<img src="./A2C/trained_models/PyBulletHopper/hopper.gif" width="400" height="auto"/>
