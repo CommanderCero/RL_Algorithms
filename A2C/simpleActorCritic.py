@@ -3,10 +3,11 @@ import utils
 
 import numpy as np
 import gym
-import pybulletgym
+#import pybulletgym
 import wandb
 import datetime
 import os
+from timeit import default_timer as timer
 from pathlib import Path
 
 import torch
@@ -25,6 +26,7 @@ def train(actor: models.Policy, critic: nn.Module, env,
         {'params': actor.parameters(), 'lr': actor_lr},
         {'params': critic.parameters(), 'lr': critic_lr}
     ], lr=0.001)
+    start = timer()
     
     episode_lengths = [0]
     episode_returns = [0]
@@ -93,7 +95,8 @@ def train(actor: models.Policy, critic: nn.Module, env,
                 "Avg. Return": np.mean(episode_returns), 
                 "Max Return": np.max(episode_returns),
                 "Min Return": np.min(episode_returns),
-                "Avg. Episode Length": np.mean(episode_lengths)},
+                "Avg. Episode Length": np.mean(episode_lengths),
+                "Time Passed (Minutes)": (timer() - start) / 60},
                 step=log_step
             )
             
@@ -119,7 +122,7 @@ def train(actor: models.Policy, critic: nn.Module, env,
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='HopperPyBulletEnv-v0')
+    parser.add_argument('--env', type=str, default='CartPole-v0')
     parser.add_argument('--layers', type=int, nargs='+', default=[64, 128])
     parser.add_argument('--rew_decay', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
