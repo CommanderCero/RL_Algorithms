@@ -24,24 +24,31 @@ def train(actor: models.Policy, critic: nn.Module, env_fn: Callable[[], gym.Env]
           entropy_weight=0.01, max_gradient_norm=0.5,
           save_frequency=50, log_folder='.', log_video=False):
     
-    # Initialize training
+    # Initialize environment and buffer
     env = gym.vector.AsyncVectorEnv([env_fn] * env_count)
     buffer = utils.VecTrajectoryBuffer(
         env.single_observation_space.shape,
         env.single_action_space.shape,
         env_count, env_steps)
     
+    # Initialize optimizer - Shared parameters are trained with the lower learning rate
+    actor_params = set(actor.parameters())
+    critic_params = set(critic.parameters())
+    shared_params = actor_params.intersection(critic_params)
+    actor_params = actor_params.difference(shared_params)
+    critic_params = critic_params.difference(shared_params)
     optimizer = torch.optim.Adam([
-        {'params': actor.parameters(), 'lr': actor_lr},
-        {'params': critic.parameters(), 'lr': critic_lr}
-    ], lr=0.001)
+        {'params': list(actor_params), 'lr': actor_lr},
+        {'params': list(critic_params), 'lr': critic_lr},
+        {'params': list(shared_params), 'lr': min(actor_lr, critic_lr)}
+    ])
+
+    # Training
     start = timer()
-    
     episode_lengths = [[0] for _ in range(env_count)]
     episode_returns = [[0] for _ in range(env_count)]
     log_step = 0
     states = env.reset()
-    # Training loop
     for step in range(train_steps):
         ### Collect training data
         buffer.clear()
@@ -69,6 +76,8 @@ def train(actor: models.Policy, critic: nn.Module, env_fn: Callable[[], gym.Env]
         
         ### Train
         data = buffer.get_data(device)
+        data["returns"] -= data["returns"].mean()
+        data["returns"] /= data["returns"].std() + 1e-6
         values = critic(data["observations"]).reshape(-1)
         
         # Compute Actor "Loss"
@@ -91,9 +100,10 @@ def train(actor: models.Policy, critic: nn.Module, env_fn: Callable[[], gym.Env]
         
         ### Logging
         if step % save_frequency == 0 or step == train_steps - 1:
-            episode_returns = [val for arr in episode_returns for val in arr]
-            episode_lengths = [val for arr in episode_lengths for val in arr]
-            print(f"{step}: Avg Return={np.mean(episode_returns)}")
+            # Flatten the episode stats and ignore the last entry since it's an unfinished episode
+            flat_returns = [val for arr in episode_returns for val in arr]
+            flat_lengths = [val for arr in episode_lengths for val in arr]
+            print(f"{step}: Avg Return={np.mean(flat_returns)}")
             
             # Save networks
             torch.save(actor.state_dict(), os.path.join(log_folder, "actor_latest.torch"))
@@ -104,15 +114,15 @@ def train(actor: models.Policy, critic: nn.Module, env_fn: Callable[[], gym.Env]
                  "Actor Loss": actor_loss,
                  "Critic Loss": critic_loss,
                  "Entropy Loss": entropy_loss,
-                 "Avg. Return": np.mean(episode_returns), 
-                 "Max Return": np.max(episode_returns),
-                 "Min Return": np.min(episode_returns),
-                 "Avg. Episode Length": np.mean(episode_lengths),
+                 "Avg. Return": np.mean(flat_returns), 
+                 "Max Return": np.max(flat_returns),
+                 "Min Return": np.min(flat_returns),
+                 "Avg. Episode Length": np.mean(flat_lengths),
                  "Time Passed (Minutes)": (timer() - start) / 60},
                  step=log_step)
             
             if log_video:
-                wandb.log({"Actor": utils.capture_video(actor, env_fn())}, step=log_step, device=device)
+                wandb.log({"Actor": utils.capture_video(actor, env_fn(), device=device)}, step=log_step)
             
             actor_params = {f"actor/param/{name}" : wandb.Histogram(param.detach().cpu()) for name, param in actor.named_parameters()}
             critic_params = {f"critic/param/{name}" : wandb.Histogram(param.detach().cpu()) for name, param in critic.named_parameters()}
@@ -123,9 +133,9 @@ def train(actor: models.Policy, critic: nn.Module, env_fn: Callable[[], gym.Env]
             wandb.log(actor_grads, step=log_step)
             wandb.log(critic_grads, step=log_step)
             
-            # Clear old logging data
-            episode_lengths = [[0] for _ in range(env_count)]
-            episode_returns = [[0] for _ in range(env_count)]
+            # Clear old logging data but keep the unfinished episode
+            episode_lengths = [[episode_lengths[i][-1]] for i in range(env_count)]
+            episode_returns = [[episode_returns[i][-1]] for i in range(env_count)]
             
             # Advance log_step
             log_step += 1

@@ -114,6 +114,7 @@ class VecTrajectoryBuffer:
             
     def get_data(self, device=torch.device('cpu')):
         sl = slice(0, self.pos)
+        
         data = dict(
             observations=self._remove_env_axis(self.observations[sl]),
             actions=self._remove_env_axis(self.actions[sl]),
@@ -151,16 +152,22 @@ def play(model: models.Policy, env: gym.Env, repeats=10, device=torch.device('cp
         
     env.close()
     
-def capture_video(model: models.Policy, env: gym.Env, caption=None, fps=30):
+def capture_video(model: models.Policy, env: gym.Env, fps=30, device=torch.device('cpu')):
+    frames = []
+    reward_sum = 0
+    step_count = 0
+    
     state = env.reset()
     done = False
-    frames = []
     while not done:
-        inp = torch.FloatTensor([state])
+        inp = torch.FloatTensor([state]).to(device)
         action = model.get_actions(inp)[0]
         state, reward, done, _ = env.step(action)
-        frames.append(env.render("rgb_array"))
+        frames.append(np.array(env.render("rgb_array")))
+        
+        reward_sum += reward
+        step_count += 1
      
     frames = np.array(frames) # (Time, Width, Height, Channels)
     frames = np.moveaxis(frames, 3, 1) # (Time, Channels, Width, Height)
-    return wandb.Video(frames, caption=caption, fps=fps)
+    return wandb.Video(frames, caption=f"RewardSum={reward_sum}; EpisodeLength={step_count}", fps=fps)
